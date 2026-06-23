@@ -1,0 +1,6 @@
+{
+  "name": "GmaxHub",
+  "description": "Premium companion download hub for your video server. Seamlessly fetch, select quality, and save high-speed stream contents offline.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
