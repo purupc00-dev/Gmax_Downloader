@@ -42,24 +42,32 @@ async function startServer() {
     }
 
     try {
-      // Get referer or custom origin if specified by user to bypass basic hotlink protection
-      const referer = req.query.referer as string || req.headers.referer as string;
-      const origin = req.query.origin as string;
+     // Aggressive Header Spoofing to bypass 403 Forbidden errors
+      let spoofedReferer = req.query.referer as string || req.headers.referer as string;
+      let spoofedOrigin = req.query.origin as string;
       const customHeadersStr = req.query.headers as string;
+
+      if (!spoofedReferer) {
+        if (targetUrl.includes("vidking")) {
+          spoofedReferer = "https://vidking.net/";
+          spoofedOrigin = "https://vidking.net";
+        } else if (targetUrl.includes("vidsrc") || targetUrl.includes("2embed")) {
+          spoofedReferer = new URL(targetUrl).origin + "/";
+          spoofedOrigin = new URL(targetUrl).origin;
+        } else {
+          // Default fallback: pretend we are the host site itself
+          spoofedReferer = new URL(targetUrl).origin + "/";
+          spoofedOrigin = new URL(targetUrl).origin;
+        }
+      }
 
       const headers: Record<string, string> = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "*/*",
         "Accept-Language": "en-US,en;q=0.9",
+        "Origin": spoofedOrigin,
+        "Referer": spoofedReferer
       };
-
-      if (referer) {
-        headers["Referer"] = referer;
-      }
-      if (origin) {
-        headers["Origin"] = origin;
-      }
-
       // Add any custom headers passed by the user as a JSON string
       if (customHeadersStr) {
         try {
@@ -258,12 +266,25 @@ async function startServer() {
     console.log(`Starting Cloud Stitch Server-Side download pipeline for url: ${targetUrl}`);
 
     try {
-      // Setup bypass headers
+     // Setup aggressive bypass headers
+      let spoofedReferer = customReferer;
+      let spoofedOrigin = customOrigin;
+
+      if (!spoofedReferer) {
+        if (targetUrl.includes("vidking")) {
+          spoofedReferer = "https://vidking.net/";
+          spoofedOrigin = "https://vidking.net";
+        } else {
+          spoofedReferer = new URL(targetUrl).origin + "/";
+          spoofedOrigin = new URL(targetUrl).origin;
+        }
+      }
+
       const headers: Record<string, string> = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Origin": spoofedOrigin,
+        "Referer": spoofedReferer
       };
-      if (customReferer) headers["Referer"] = customReferer;
-      if (customOrigin) headers["Origin"] = customOrigin;
       if (customHeadersStr) {
         try {
           const parsed = JSON.parse(customHeadersStr);
