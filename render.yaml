@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: gmax-downloader
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: TMDB_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: "*"
+      - key: CACHE_TTL_SECONDS
+        value: "1800"
+    healthCheckPath: /api/health

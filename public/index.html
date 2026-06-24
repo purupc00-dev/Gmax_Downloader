@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Gmax Downloader</title>
+<meta name="description" content="Resolve TMDB IDs to direct download links. Companion to GmaxHub." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⬇️</text></svg>" />
+<style>
+  :root {
+    --bg: #0b0b10;
+    --panel: #14141c;
+    --border: #23232e;
+    --text: #f5f5f7;
+    --muted: #8b8b96;
+    --brand: #e50914;
+    --brand-hover: #c80710;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 15px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh;
+  }
+  header {
+    padding: 28px 24px 12px; max-width: 880px; margin: 0 auto;
+  }
+  h1 { margin: 0 0 4px; font-size: 28px; letter-spacing: -0.02em; }
+  header p { margin: 0; color: var(--muted); }
+  main { max-width: 880px; margin: 0 auto; padding: 16px 24px 64px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    padding: 20px; margin-top: 20px;
+  }
+  .row { display: grid; grid-template-columns: 1fr 140px 100px 100px; gap: 10px; margin-bottom: 12px; }
+  @media (max-width: 600px) { .row { grid-template-columns: 1fr 1fr; } }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+  input, select {
+    width: 100%; padding: 10px 12px; border-radius: 8px;
+    background: #0b0b10; border: 1px solid var(--border); color: var(--text); font: inherit;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--brand); }
+  button {
+    background: var(--brand); color: white; border: 0; padding: 12px 18px;
+    border-radius: 8px; font-weight: 600; font-size: 15px; cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover { background: var(--brand-hover); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .source {
+    display: flex; align-items: center; gap: 12px; padding: 12px;
+    border: 1px solid var(--border); border-radius: 10px; margin-top: 10px;
+    background: #0b0b10;
+  }
+  .badge {
+    font-size: 11px; padding: 3px 8px; border-radius: 4px;
+    background: var(--border); color: var(--text); text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .badge.mp4 { background: #1e5128; color: #a3e6b2; }
+  .badge.m3u8 { background: #4d2a14; color: #ffb380; }
+  .source .meta { flex: 1; min-width: 0; }
+  .source .meta .name { font-weight: 600; }
+  .source .meta .url { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .source a.dl {
+    background: var(--brand); color: white; padding: 8px 14px; border-radius: 6px;
+    text-decoration: none; font-weight: 600; font-size: 14px;
+  }
+  .source a.dl:hover { background: var(--brand-hover); }
+  .empty, .err { color: var(--muted); padding: 20px; text-align: center; }
+  .err { color: #ff8080; }
+  .meta-preview { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; }
+  .meta-preview img { width: 60px; height: 90px; object-fit: cover; border-radius: 6px; }
+  .spinner {
+    display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite;
+    vertical-align: middle; margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 20px; }
+  footer code { background: var(--panel); padding: 2px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>⬇️ Gmax Downloader</h1>
+  <p>Enter a TMDB ID to resolve direct stream/download links.</p>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <div>
+        <label for="tmdb">TMDB ID</label>
+        <input id="tmdb" placeholder="e.g. 550" autocomplete="off" />
+      </div>
+      <div>
+        <label for="type">Type</label>
+        <select id="type">
+          <option value="movie">Movie</option>
+          <option value="tv">TV</option>
+        </select>
+      </div>
+      <div id="seasonWrap" style="display:none">
+        <label for="season">Season</label>
+        <input id="season" type="number" min="1" value="1" />
+      </div>
+      <div id="episodeWrap" style="display:none">
+        <label for="episode">Episode</label>
+        <input id="episode" type="number" min="1" value="1" />
+      </div>
+    </div>
+    <button id="go">Resolve</button>
+  </div>
+
+  <div id="out"></div>
+</main>
+<footer>
+  API: <code>POST /api/resolve</code> &middot; <code>GET /api/health</code>
+</footer>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const tvFields = () => {
+    const tv = $('type').value === 'tv';
+    $('seasonWrap').style.display = tv ? 'block' : 'none';
+    $('episodeWrap').style.display = tv ? 'block' : 'none';
+  };
+  $('type').addEventListener('change', tvFields);
+  tvFields();
+
+  // Read from URL params for easy GmaxHub deep-link
+  const params = new URLSearchParams(location.search);
+  if (params.get('tmdbId')) $('tmdb').value = params.get('tmdbId');
+  if (params.get('type')) { $('type').value = params.get('type'); tvFields(); }
+  if (params.get('season')) $('season').value = params.get('season');
+  if (params.get('episode')) $('episode').value = params.get('episode');
+  if (params.get('tmdbId')) setTimeout(resolve, 100);
+
+  $('go').addEventListener('click', resolve);
+
+  async function resolve() {
+    const tmdbId = $('tmdb').value.trim();
+    if (!tmdbId) return;
+    const type = $('type').value;
+    const body = { tmdbId, type };
+    if (type === 'tv') {
+      body.season = parseInt($('season').value, 10);
+      body.episode = parseInt($('episode').value, 10);
+    }
+    const out = $('out');
+    out.innerHTML = '<div class="card empty"><span class="spinner"></span>Resolving sources… can take 10–20 seconds.</div>';
+    $('go').disabled = true;
+
+    let meta = null;
+    try {
+      const mr = await fetch(`/api/meta?tmdbId=${tmdbId}&type=${type}`);
+      if (mr.ok) meta = await mr.json();
+    } catch {}
+
+    try {
+      const r = await fetch('/api/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      render(meta, data);
+    } catch (e) {
+      out.innerHTML = `<div class="card err">Request failed: ${escape(e.message)}</div>`;
+    } finally {
+      $('go').disabled = false;
+    }
+  }
+
+  function render(meta, data) {
+    const out = $('out');
+    const sources = data.sources || [];
+    let html = '<div class="card">';
+    if (meta) {
+      html += `<div class="meta-preview">
+        ${meta.poster ? `<img src="${meta.poster}" alt="">` : ''}
+        <div>
+          <div style="font-weight:600;font-size:17px">${escape(meta.title || ('TMDB ' + meta.id))}</div>
+          <div style="color:var(--muted);font-size:13px">${escape(meta.year || '')}</div>
+        </div>
+      </div>`;
+    }
+    if (!sources.length) {
+      html += `<div class="empty">${data.error ? escape(data.error) : 'No sources found.'}</div>`;
+    } else {
+      for (const s of sources) {
+        html += `<div class="source">
+          <span class="badge ${s.type}">${s.type}</span>
+          <div class="meta">
+            <div class="name">${escape(s.server)} &middot; ${escape(s.quality)}</div>
+            <div class="url">${escape(s.url)}</div>
+          </div>
+          <a class="dl" href="${escape(s.url)}" download target="_blank" rel="noopener">Download</a>
+        </div>`;
+      }
+      html += `<div style="margin-top:14px;color:var(--muted);font-size:12px">
+        <strong>.mp4</strong> downloads directly. <strong>.m3u8</strong> is an HLS playlist —
+        open it in VLC (Media → Open Network Stream) or use a browser extension like Stream Detector.
+      </div>`;
+    }
+    html += '</div>';
+    out.innerHTML = html;
+  }
+
+  function escape(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+</script>
+</body>
+</html>
