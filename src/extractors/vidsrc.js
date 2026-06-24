@@ -4,7 +4,7 @@
 import * as cheerio from 'cheerio';
 import { httpGet, detectType } from './_util.js';
 
-const BASES = ['https://vidsrc.xyz', 'https://vidsrc.net', 'https://vidsrc.to'];
+const BASES = ['https://streamsrcs.2embed.cc/vpls?tmdb=${p.tmdbId}', 'https://vidsrc.net', 'https://vidsrc-embed.ru/embed'];
 
 export async function extractVidsrc({ tmdbId, type, season, episode }) {
   const sources = [];
