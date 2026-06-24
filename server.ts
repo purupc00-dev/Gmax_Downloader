@@ -5,15 +5,43 @@ import { Readable } from "stream";
 import crypto from "crypto";
 import { GoogleGenAI } from "@google/genai";
 
+// Stealth Scraper Imports
+import puppeteer from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
+
+puppeteer.use(StealthPlugin());
+
+// Dynamic Stream Servers Config
+const STREAM_SERVERS = {
+  movie: [
+    { name: "Server VidKing", getUrl: (p: any) => `https://vidking.net/embed/movie/${p.tmdbId}?color=e50914&autoPlay=true` },
+    { name: "Server Xps", getUrl: (p: any) => `https://www.2embed.cc/embed/${p.tmdbId}` },
+    { name: "Server Veasy", getUrl: (p: any) => `https://player.videasy.to/movie/${p.tmdbId}` },
+    { name: "Server Vapi", getUrl: (p: any) => `https://vidapi.xyz/embed/movie/${p.tmdbId}` },
+    { name: "Server VSrc", getUrl: (p: any) => `https://vidsrc-embed.ru/embed/movie/${p.tmdbId}` },
+    { name: "Server Vidplus", getUrl: (p: any) => `https://player2.vidplus.pro/embed/movie/${p.tmdbId}` },
+    { name: "Server Bluey", getUrl: (p: any) => `https://streamsrcs.2embed.cc/vpls?tmdb=${p.tmdbId}` },
+    { name: "Server 111M", getUrl: (p: any) => `https://111movies.net/movie/${p.tmdbId}` }
+  ],
+  tv: [
+    { name: "Server VidKing", getUrl: (p: any) => `https://vidking.net/embed/tv/${p.tmdbId}/${p.season || 1}/${p.episode || 1}?color=e50914&autoPlay=true` },
+    { name: "Server Xps", getUrl: (p: any) => `https://www.2embed.cc/embedtv/${p.tmdbId}&s=${p.season || 1}&e=${p.episode || 1}` },
+    { name: "Server Veasy", getUrl: (p: any) => `https://player.videasy.to/tv/${p.tmdbId}/${p.season || 1}/${p.episode || 1}` },
+    { name: "Server Vapi", getUrl: (p: any) => `https://vidapi.xyz/embed/tv/${p.tmdbId}/${p.season || 1}/${p.episode || 1}` },
+    { name: "Server VSrc", getUrl: (p: any) => `https://vidsrc-embed.ru/embed/tv/${p.tmdbId}/${p.season || 1}-${p.episode || 1}` },
+    { name: "Server Vidplus", getUrl: (p: any) => `https://player2.vidplus.pro/embed/tv/${p.tmdbId}/${p.season || 1}/${p.episode || 1}` },
+    { name: "Server Bluey", getUrl: (p: any) => `https://streamsrcs.2embed.cc/vpls-tv?tmdb=${p.tmdbId}&s=${p.season || 1}&e=${p.episode || 1}` },
+    { name: "Server 111M", getUrl: (p: any) => `https://111movies.net/tv/${p.tmdbId}/${p.season || 1}/${p.episode || 1}` }
+  ]
+};
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // Add JSON parsing and basic middleware
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // CORS headers just in case
   app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -30,7 +58,6 @@ async function startServer() {
     }
 
     try {
-      // Validate target URL is HTTP/HTTPS
       const parsedUrl = new URL(targetUrl);
       if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
         res.status(400).json({ error: "Invalid protocol. Only HTTP and HTTPS are supported." });
@@ -42,7 +69,7 @@ async function startServer() {
     }
 
     try {
-     // Aggressive Header Spoofing to bypass 403 Forbidden errors
+      // Aggressive Header Spoofing to bypass 403 Forbidden errors
       let spoofedReferer = req.query.referer as string || req.headers.referer as string;
       let spoofedOrigin = req.query.origin as string;
       const customHeadersStr = req.query.headers as string;
@@ -55,7 +82,6 @@ async function startServer() {
           spoofedReferer = new URL(targetUrl).origin + "/";
           spoofedOrigin = new URL(targetUrl).origin;
         } else {
-          // Default fallback: pretend we are the host site itself
           spoofedReferer = new URL(targetUrl).origin + "/";
           spoofedOrigin = new URL(targetUrl).origin;
         }
@@ -68,7 +94,7 @@ async function startServer() {
         "Origin": spoofedOrigin,
         "Referer": spoofedReferer
       };
-      // Add any custom headers passed by the user as a JSON string
+
       if (customHeadersStr) {
         try {
           const parsedCustom = JSON.parse(customHeadersStr);
@@ -80,7 +106,6 @@ async function startServer() {
         }
       }
 
-      // Perform the request to fetch the stream file
       const response = await fetch(targetUrl, {
         headers,
         method: "GET",
@@ -94,7 +119,6 @@ async function startServer() {
         return;
       }
 
-      // Forward headers
       const contentType = response.headers.get("content-type");
       const contentLength = response.headers.get("content-length");
       const acceptRanges = response.headers.get("accept-ranges");
@@ -105,7 +129,6 @@ async function startServer() {
       if (acceptRanges) res.setHeader("Accept-Ranges", acceptRanges);
       if (contentRange) res.setHeader("Content-Range", contentRange);
 
-      // Handle stream body
       if (response.body) {
         const readable = Readable.fromWeb(response.body as any);
         readable.pipe(res);
@@ -125,7 +148,7 @@ async function startServer() {
   app.get("/api/extract", async (req, res) => {
     const tmdbId = req.query.tmdbId as string;
     const mediaType = (req.query.type as string || req.query.mediaType as string || "movie").toLowerCase();
-    const provider = (req.query.provider as string || "vidking").toLowerCase();
+    const providerParam = (req.query.provider as string || "Server VidKing").toLowerCase();
     const season = req.query.season ? parseInt(req.query.season as string, 10) : 1;
     const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : 1;
 
@@ -134,10 +157,10 @@ async function startServer() {
       return;
     }
 
-    console.log(`Extracting stream for TMDB ID: ${tmdbId}, Type: ${mediaType}, Provider: ${provider}, S: ${season}, E: ${episode}`);
+    console.log(`Extracting stream for TMDB ID: ${tmdbId}, Type: ${mediaType}, Provider: ${providerParam}, S: ${season}, E: ${episode}`);
 
     try {
-      // 1. Fetch metadata (Title, Overview, Poster) from TMDB, Cinemeta, or Gemini AI fallback
+      // 1. Fetch metadata
       let title = mediaType === "movie" ? `Movie (TMDB: ${tmdbId})` : `TV Show S${season}E${episode} (ID: ${tmdbId})`;
       let overview = "Connecting to high-bitrate streaming nodes for file preparation...";
       let poster = "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500&q=80";
@@ -159,7 +182,6 @@ async function startServer() {
           console.warn("Failed to fetch from TMDB:", tmdbErr);
         }
       } else {
-        // Playwright/Scrape fallback or Gemini AI metadata synthesizer
         try {
           const geminiKey = process.env.GEMINI_API_KEY;
           if (geminiKey && geminiKey !== "MY_GEMINI_API_KEY") {
@@ -167,25 +189,14 @@ async function startServer() {
               apiKey: geminiKey,
               httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
             });
-
-            const prompt = `You are a movie and show catalog service. Identify the title, release year, a beautiful 20-word description, and standard TMDB poster/backdrop paths for the TMDB ID: "${tmdbId}" (Media Type: "${mediaType}"). Return ONLY a raw JSON payload matching this type schema: { "title": "...", "overview": "...", "poster_path": "...", "backdrop_path": "..." }. Do not include any HTML elements, markdown blocks, backticks, or other text.`;
-
-            const response = await ai.models.generateContent({
-              model: "gemini-3.5-flash",
-              contents: prompt,
-            });
-
+            const prompt = `You are a movie catalog service. Identify title, overview, poster/backdrop for TMDB ID: "${tmdbId}" (Type: "${mediaType}"). Return raw JSON: { "title": "...", "overview": "...", "poster_path": "...", "backdrop_path": "..." }`;
+            const response = await ai.models.generateContent({ model: "gemini-3.5-flash", contents: prompt });
             if (response.text) {
-              const cleaned = response.text.replace(/```json|```/gi, "").trim();
-              const parsed = JSON.parse(cleaned);
+              const parsed = JSON.parse(response.text.replace(/```json|```/gi, "").trim());
               title = parsed.title || title;
               overview = parsed.overview || overview;
-              if (parsed.poster_path) {
-                poster = parsed.poster_path.startsWith("http") ? parsed.poster_path : `https://image.tmdb.org/t/p/w500${parsed.poster_path}`;
-              }
-              if (parsed.backdrop_path) {
-                backdrop = parsed.backdrop_path.startsWith("http") ? parsed.backdrop_path : `https://image.tmdb.org/t/p/original${parsed.backdrop_path}`;
-              }
+              if (parsed.poster_path) poster = parsed.poster_path.startsWith("http") ? parsed.poster_path : `https://image.tmdb.org/t/p/w500${parsed.poster_path}`;
+              if (parsed.backdrop_path) backdrop = parsed.backdrop_path.startsWith("http") ? parsed.backdrop_path : `https://image.tmdb.org/t/p/original${parsed.backdrop_path}`;
             }
           }
         } catch (geminiErr) {
@@ -193,52 +204,76 @@ async function startServer() {
         }
       }
 
-      // 2. Select stream URL
-      // Since external embed scrapers have dynamic security/Turnstile blockades, we resolve real-time working HLS playlists
-      // so GmaxHub downloads always succeed under any environment!
-      // We map to robust public multi-resolution master and encoded HLS streams.
-      let streamUrl = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"; // default High Quality multi-resolution Big Buck Bunny
-      if (tmdbId === "encrypted" || tmdbId.includes("aes")) {
-        streamUrl = "https://playertest.longtailvideo.com/adaptive/aes-128/gpt-aes.m3u8";
-      } else if (parseInt(tmdbId, 10) % 2 === 0) {
-        streamUrl = "https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8"; // Movie stream Sintel
+      // 2. Select Server from Config
+      const availableServers = mediaType === "movie" ? STREAM_SERVERS.movie : STREAM_SERVERS.tv;
+      let selectedServerObj = availableServers.find(s => s.name.toLowerCase() === providerParam.toLowerCase());
+      if (!selectedServerObj) selectedServerObj = availableServers[0];
+
+      const targetEmbedUrl = selectedServerObj.getUrl({ tmdbId, season, episode });
+      let streamUrl = "";
+
+      // 3. Launch Puppeteer to scrape the real .m3u8 file
+      console.log(`[SCRAPER] Launching stealth browser to target: ${targetEmbedUrl}`);
+      try {
+        const browser = await puppeteer.launch({
+          headless: true,
+          args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox', 
+            '--disable-dev-shm-usage',
+            '--disable-web-security'
+          ]
+        });
+
+        const page = await browser.newPage();
+        await page.setRequestInterception(true);
+
+        page.on('request', (request) => {
+          const url = request.url();
+          if (url.includes('.m3u8') && !url.includes('adserver') && !streamUrl) {
+            console.log(`[SCRAPER] Caught stream link: ${url}`);
+            streamUrl = url; 
+          }
+          if (['image', 'stylesheet', 'font'].includes(request.resourceType()) || url.includes('google-analytics')) {
+            request.abort();
+          } else {
+            request.continue();
+          }
+        });
+
+        await page.goto(targetEmbedUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+
+        // Simulate click to trigger video load if not caught immediately
+        if (!streamUrl) {
+          console.log("[SCRAPER] Simulating click...");
+          await page.mouse.click(500, 500);
+          await new Promise(r => setTimeout(r, 4000));
+        }
+
+        await browser.close();
+      } catch (scrapeErr) {
+        console.error("Puppeteer Scraping Error:", scrapeErr);
       }
 
-      const servers = [
-        "Server A (Vidsrc High-Speed CDN)",
-        "Server B (VidKing Premium Edge)",
-        "Server C (GmaxHub Decentralized Node)"
-      ];
+      if (!streamUrl) {
+        throw new Error(`Failed to extract the raw .m3u8 video file from ${selectedServerObj.name}. Anti-bot protections may be active.`);
+      }
 
-      const qualities = [
-        "1080p (Full HD Stream)",
-        "720p (HD Compressed)",
-        "480p (Standard Play)",
-        "360p (Data Saver Mode)"
-      ];
-
-      const languages = [
-        "English (Original Stereo Track)",
-        "Hindi Dubbed Stereo Lossless",
-        "Tamil Audio Dual-Track",
-        "Spanish (Castilian Audio)"
-      ];
-
+      // Return exactly what the UI needs. (Notice qualities & languages are removed, App.tsx handles them natively now)
       res.status(200).json({
         success: true,
         tmdbId,
         mediaType,
-        provider,
+        provider: selectedServerObj.name,
         title,
         overview,
         poster,
         backdrop,
         url: streamUrl,
         filename: `${title.replace(/[^a-zA-Z0-9]/g, "_")}_${mediaType === "tv" ? `S${season}E${episode}` : "Movie"}`,
-        servers,
-        qualities,
-        languages
+        servers: availableServers.map(s => s.name)
       });
+      
     } catch (e: any) {
       console.error("Extraction routing failure:", e);
       res.status(500).json({
@@ -249,8 +284,7 @@ async function startServer() {
     }
   });
 
-  // API endpoint: Server-Side Segment Aggregator & Decryptor Downloader (Memory Stream Mode)
-  // Recursively stitches and pipes chunks on the fly into the client response stream.
+  // API endpoint: Server-Side Segment Aggregator & Decryptor Downloader
   app.get("/api/download", async (req, res) => {
     const targetUrl = req.query.url as string;
     const filename = (req.query.filename as string || "decoded_video").replace(/[^a-zA-Z0-9_\s-]/g, "_") + ".mp4";
@@ -263,10 +297,7 @@ async function startServer() {
       return;
     }
 
-    console.log(`Starting Cloud Stitch Server-Side download pipeline for url: ${targetUrl}`);
-
     try {
-     // Setup aggressive bypass headers
       let spoofedReferer = customReferer;
       let spoofedOrigin = customOrigin;
 
@@ -292,7 +323,6 @@ async function startServer() {
         } catch (e) { /* ignored */ }
       }
 
-      // 1. Fetch playlist index
       const m3u8Res = await fetch(targetUrl, { headers });
       if (!m3u8Res.ok) {
         res.status(400).json({ error: `HLS endpoint returned error response code ${m3u8Res.status}` });
@@ -305,7 +335,6 @@ async function startServer() {
         return;
       }
 
-      // 2. Resolve TS blocks and decryption key declarations
       const lines = text.split(/\r?\n/);
       const segments: { uri: string; keyInfo?: { method: string; uri: string; iv?: Buffer } }[] = [];
       let currentKey: { method: string; uri: string; iv?: Buffer } | undefined;
@@ -337,13 +366,11 @@ async function startServer() {
           continue;
         }
 
-        // It is a segment URL
         const segmentAbsoluteUrl = new URL(trimmed, targetUrl).href;
         let segmentKey = currentKey ? { ...currentKey } : undefined;
 
         if (segmentKey && !segmentKey.iv) {
           const defaultIv = Buffer.alloc(16);
-          // Set sequence number as IV big endian
           defaultIv.writeUInt32BE(segmentIndex, 12);
           segmentKey.iv = defaultIv;
         }
@@ -357,26 +384,20 @@ async function startServer() {
         return;
       }
 
-      // 3. Initiate piping response
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.setHeader("Content-Type", "video/mp4");
 
       const keyCacheMap = new Map<string, Buffer>();
 
-      // Stream each segment sequentially in-memory
       for (let i = 0; i < segments.length; i++) {
         const seg = segments[i];
         try {
           const segRes = await fetch(seg.uri, { headers });
-          if (!segRes.ok) {
-            console.warn(`Failed to connect to chunk index ${i}: ${seg.uri}`);
-            continue;
-          }
+          if (!segRes.ok) continue;
 
           const rawArrayBuffer = await segRes.arrayBuffer();
           let payload = Buffer.from(rawArrayBuffer);
 
-          // AES Decryption
           if (seg.keyInfo) {
             let keyBytes = keyCacheMap.get(seg.keyInfo.uri);
             if (!keyBytes) {
@@ -412,7 +433,6 @@ async function startServer() {
     }
   });
 
-  // Client-Side Dev environment vs. build production serving
   if (process.env.NODE_ENV !== "production") {
     console.log("Starting in development mode with Vite middleware...");
     const vite = await createViteServer({
